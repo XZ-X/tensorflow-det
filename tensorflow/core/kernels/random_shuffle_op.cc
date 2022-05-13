@@ -77,6 +77,12 @@ class RandomShuffleOp : public OpKernel {
       const int64 size = input.dim_size(0);
       const int64 samples = size - 1;
       auto local_gen = generator_.ReserveSamples32(samples);
+      //DETrain
+      int64 current_seed = context->current_step();
+      if(current_seed!=-1) {
+        local_gen = generator_.ReserveSamples32(samples, current_seed);
+      }
+
       random::SingleSampleAdapter<random::PhiloxRandom> single(&local_gen);
       const auto uniform = [&single](uint32 n) { return single() % n; };
 

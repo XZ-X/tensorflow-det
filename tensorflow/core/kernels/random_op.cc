@@ -75,12 +75,23 @@ class PhiloxRandomOp : public OpKernel {
     Tensor* output;
     OP_REQUIRES_OK(ctx, AllocateOutputWithShape(ctx, shape, 0, &output));
     auto output_flat = output->flat<T>();
-    functor::FillPhiloxRandom<Device, Distribution>()(
-        ctx, ctx->eigen_device<Device>(),
-        // Multiplier 256 is the same as in FillPhiloxRandomTask; do not change
-        // it just here.
-        generator_.ReserveRandomOutputs(output_flat.size(), 256),
-        output_flat.data(), output_flat.size(), Distribution());
+    //DETrain
+    int64 current_seed = ctx->current_step();
+    if(current_seed==-1) {
+      functor::FillPhiloxRandom<Device, Distribution>()(
+          ctx, ctx->eigen_device<Device>(),
+          // Multiplier 256 is the same as in FillPhiloxRandomTask; do not change
+          // it just here.
+          generator_.ReserveRandomOutputs(output_flat.size(), 256),
+          output_flat.data(), output_flat.size(), Distribution());
+    } else {
+      functor::FillPhiloxRandom<Device, Distribution>()(
+          ctx, ctx->eigen_device<Device>(),
+          // Multiplier 256 is the same as in FillPhiloxRandomTask; do not change
+          // it just here.
+          generator_.ReserveRandomOutputs(output_flat.size(), 256, current_seed),
+          output_flat.data(), output_flat.size(), Distribution());
+    }
   }
 
  private:
@@ -124,12 +135,23 @@ class RandomUniformIntOp : public OpKernel {
     Distribution dist(lo, hi);
 
     auto output_flat = output->flat<IntType>();
-    functor::FillPhiloxRandom<Device, Distribution>()(
-        ctx, ctx->eigen_device<Device>(),
-        // Multiplier 256 is the same as in FillPhiloxRandomTask; do not change
-        // it just here.
-        generator_.ReserveRandomOutputs(output_flat.size(), 256),
-        output_flat.data(), output_flat.size(), dist);
+    //DETrain
+    int64 current_seed = ctx->current_step();
+    if(current_seed==-1) {
+      functor::FillPhiloxRandom<Device, Distribution>()(
+          ctx, ctx->eigen_device<Device>(),
+          // Multiplier 256 is the same as in FillPhiloxRandomTask; do not change
+          // it just here.
+          generator_.ReserveRandomOutputs(output_flat.size(), 256),
+          output_flat.data(), output_flat.size(), dist);
+    } else{
+      functor::FillPhiloxRandom<Device, Distribution>()(
+          ctx, ctx->eigen_device<Device>(),
+          // Multiplier 256 is the same as in FillPhiloxRandomTask; do not change
+          // it just here.
+          generator_.ReserveRandomOutputs(output_flat.size(), 256, current_seed),
+          output_flat.data(), output_flat.size(), dist);
+    }
   }
 
  private:
@@ -197,9 +219,16 @@ class RandomGammaOp : public OpKernel {
                     "Input alpha should have non-zero element count, got: ",
                     num_alphas));
     auto samples_flat = samples_t->flat<T>().data();
-    PhiloxRandom rng = generator_.ReserveRandomOutputs(
+    //DETrain
+    int64 current_seed = ctx->current_step();
+    PhiloxRandom rng;
+    if(current_seed==-1) {
+      rng = generator_.ReserveRandomOutputs(
         num_samples * num_alphas, kReservedSamplesPerOutput);
-
+    } else {
+      rng = generator_.ReserveRandomOutputs(
+        num_samples * num_alphas, kReservedSamplesPerOutput, current_seed);
+    }
     // We partition work first across alphas then across samples-per-alpha to
     // avoid a couple flops which can be done on a per-alpha basis.
 

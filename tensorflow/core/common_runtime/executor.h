@@ -88,6 +88,7 @@ class Executor {
 
   struct Args {
     int64 step_id = 0;
+    int64 steps = -1;//DETrain
     Rendezvous* rendezvous = nullptr;
     StepStatsCollectorInterface* stats_collector = nullptr;
     CallFrameInterface* call_frame = nullptr;

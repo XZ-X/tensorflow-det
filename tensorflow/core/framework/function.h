@@ -680,7 +680,8 @@ class FunctionLibraryRuntime {
     // MasterSession generates 56-bit random step IDs whose MSB is
     // always 0, so a negative random step ID should suffice.
     const int64 step_id = -std::abs(static_cast<int64>(random::New64()));
-
+    // DETrain
+    int64 steps = -1; 
     // op_id of the function running in eager mode. Set when we want to copy
     // remote outputs lazily. All components of a remote multi-device function
     // should use the same op_id, in order to correctly map remote output

@@ -302,8 +302,17 @@ class RandomPoissonOp : public OpKernel {
     const auto rate_flat = rate_t.flat<T>().data();
     const int64 num_rate = rate_t.NumElements();
     auto samples_flat = samples_t->flat<U>().data();
-    random::PhiloxRandom rng = generator_.ReserveRandomOutputs(
-        num_samples * num_rate, kReservedSamplesPerOutput);
+
+    //DETrain
+    random::PhiloxRandom rng;
+    int64 current_seed = ctx->current_step();
+    if(current_seed==-1) {
+      rng = generator_.ReserveRandomOutputs(
+          num_samples * num_rate, kReservedSamplesPerOutput);
+    } else {
+      rng = generator_.ReserveRandomOutputs(
+          num_samples * num_rate, kReservedSamplesPerOutput, current_seed);
+    }
 
     functor::PoissonFunctor<CPUDevice, T, U>()(
         ctx, ctx->eigen_device<CPUDevice>(), rate_flat, num_rate, num_samples,

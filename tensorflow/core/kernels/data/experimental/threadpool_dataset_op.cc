@@ -328,8 +328,24 @@ class MaxIntraOpParallelismDatasetOp : public UnaryDatasetOpKernel {
         return model::MakeKnownRatioNode(std::move(args),
                                          /*ratio=*/1);
       }
+      
+      //DETrain
+      Status SaveInternal(IteratorStateWriter* writer) override {
+        mutex_lock l(mu_);
+        TF_RETURN_IF_ERROR(SaveInput(writer, input_impl_));
+        return Status::OK();
+      }
+
+      Status RestoreInternal(IteratorContext* ctx,
+                             IteratorStateReader* reader) override {
+        mutex_lock l(mu_);
+        TF_RETURN_IF_ERROR(RestoreInput(ctx, reader, input_impl_));
+        return Status::OK();
+      }
 
      private:
+      //DETrain
+      mutex mu_;
       std::unique_ptr<IteratorBase> input_impl_;
     };
 
@@ -434,7 +450,23 @@ class PrivateThreadPoolDatasetOp : public UnaryDatasetOpKernel {
                                          /*ratio=*/1);
       }
 
+      //DETrain
+      Status SaveInternal(IteratorStateWriter* writer) override {
+        mutex_lock l(mu_);
+        TF_RETURN_IF_ERROR(SaveInput(writer, input_impl_));
+        return Status::OK();
+      }
+
+      Status RestoreInternal(IteratorContext* ctx,
+                             IteratorStateReader* reader) override {
+        mutex_lock l(mu_);
+        TF_RETURN_IF_ERROR(RestoreInput(ctx, reader, input_impl_));
+        return Status::OK();
+      }
+
      private:
+      //DETrain
+      mutex mu_;
       std::unique_ptr<IteratorBase> input_impl_;
     };
 

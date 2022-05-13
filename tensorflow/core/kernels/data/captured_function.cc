@@ -609,10 +609,11 @@ Status CapturedFunction::Instantiate(
 bool CapturedFunction::IsStateful() const { return !CheckExternalState().ok(); }
 
 Status CapturedFunction::CheckExternalState() const {
-  for (const auto& name : lib_def()->ListFunctionNames()) {
-    TF_RETURN_IF_ERROR(
-        IsFunctionStateful(*lib_def(), *(lib_def()->Find(name))));
-  }
+  // DETrain
+  // for (const auto& name : lib_def()->ListFunctionNames()) {
+  //   TF_RETURN_IF_ERROR(
+  //       IsFunctionStateful(*lib_def(), *(lib_def()->Find(name))));
+  // }
   return Status::OK();
 }
 
@@ -748,7 +749,7 @@ Status InstantiatedCapturedFunction::RunInstantiated(
 
 void InstantiatedCapturedFunction::RunAsync(
     IteratorContext* ctx, std::vector<Tensor>&& args, std::vector<Tensor>* rets,
-    FunctionLibraryRuntime::DoneCallback done, const string& prefix) const {
+    FunctionLibraryRuntime::DoneCallback done, const string& prefix, int64 steps) const {
   auto& info = captured_func_->short_circuit_info();
   if (!info.indices.empty()) {
     // Run the `done` callback on a threadpool thread, because it will
@@ -768,6 +769,7 @@ void InstantiatedCapturedFunction::RunAsync(
       std::move(args), &captured_func_->captured_inputs(), ret_types_);
 
   FunctionLibraryRuntime::Options f_opts;
+  f_opts.steps = steps; //DETrain
   ResourceMgr* resource_mgr = lib_->device()->resource_manager();
   ScopedStepContainer* step_container = new ScopedStepContainer(
       f_opts.step_id, [resource_mgr](const string& name) {

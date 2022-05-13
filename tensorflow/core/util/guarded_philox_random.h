@@ -22,6 +22,8 @@ limitations under the License.
 #include "tensorflow/core/platform/mutex.h"
 #include "tensorflow/core/platform/types.h"
 
+#include <unordered_map>
+
 namespace tensorflow {
 
 // A thread safe wrapper around a Philox generator.  Example usage:
@@ -56,10 +58,18 @@ class GuardedPhiloxRandom {
   // This function is thread safe.  The returned generator is valid for the
   // given number of samples, and can be used without a lock.
   random::PhiloxRandom ReserveSamples128(int64 samples);
+  
+  //DETrain
+  random::PhiloxRandom ReserveSamples128(int64 samples, int64 seed);
 
   // Reserve a certain number of 32-bit samples.
   random::PhiloxRandom ReserveSamples32(int64 samples) {
     return ReserveSamples128((samples + 3) / 4);
+  }
+  
+  //DETrain
+  random::PhiloxRandom ReserveSamples32(int64 samples, int64 seed) {
+    return ReserveSamples128((samples + 3) / 4, seed);
   }
 
   // Reserve enough random samples in the generator for the given output count.
@@ -68,13 +78,51 @@ class GuardedPhiloxRandom {
     int64 conservative_sample_count = output_count * multiplier;
     return ReserveSamples128(conservative_sample_count);
   }
+  
+  //DETrain
+  random::PhiloxRandom ReserveRandomOutputs(int64 output_count,
+                                            int multiplier, int64 seed) {
+    int64 conservative_sample_count = output_count * multiplier;
+    return ReserveSamples128(conservative_sample_count, seed);
+  }
 
  private:
   mutex mu_;
   random::PhiloxRandom generator_ GUARDED_BY(mu_);
+  //DETrain
+  mutex mu1_;
+  random::PhiloxRandom generator1_ GUARDED_BY(mu1_);
+  int64 seed = 0;
+  int64 seed2 = 0;
   bool initialized_;
 
   TF_DISALLOW_COPY_AND_ASSIGN(GuardedPhiloxRandom);
+};
+
+class RandomMonitor {
+  public:
+    static RandomMonitor& getInstance() {
+      static char buf[sizeof(RandomMonitor)];
+      static RandomMonitor* theOneTrueObject = new (buf) RandomMonitor();
+      return *theOneTrueObject;
+    }
+
+    void Monitor(random::PhiloxRandom* rng);
+
+    void LoadState();
+    
+    void SaveState();
+    
+    void AddRandom(random::PhiloxRandom* rng);
+    
+    void RestoreRandom(random::PhiloxRandom* rng);
+      
+  private:
+    RandomMonitor() {}
+
+    std::unordered_map<void*, std::string> rngs; 
+    std::unordered_map<std::string, std::vector<uint32> > history; 
+    mutex mu_;
 };
 
 }  // namespace tensorflow

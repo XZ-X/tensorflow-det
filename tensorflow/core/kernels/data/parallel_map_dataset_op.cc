@@ -30,6 +30,8 @@ limitations under the License.
 #include "tensorflow/core/lib/random/random.h"
 #include "tensorflow/core/protobuf/error_codes.pb.h"
 
+#include "tensorflow/core/util/op_logger.h"
+
 namespace tensorflow {
 namespace data {
 
@@ -166,11 +168,13 @@ class ParallelMapDatasetOp::Dataset : public DatasetBase {
     void MapFunc(IteratorContext* ctx, const string& prefix,
                  std::vector<Tensor> input_element, std::vector<Tensor>* result,
                  StatusCallback done) override {
-      auto map_func = [this](IteratorContext* ctx, const string& prefix,
+      //DETrain
+      uint64 current_iter = OpLogger::getInstance().GetAndAddIterationByName(prefix);
+      auto map_func = [this, current_iter](IteratorContext* ctx, const string& prefix,
                              std::vector<Tensor> input_element,
                              std::vector<Tensor>* result, StatusCallback done) {
         instantiated_captured_func_->RunAsync(ctx, std::move(input_element),
-                                              result, std::move(done), prefix);
+                                              result, std::move(done), prefix, current_iter);
       };
       if (!dataset_->captured_func_->use_inter_op_parallelism()) {
         (*ctx->runner())(std::bind(map_func, ctx, prefix,
@@ -304,6 +308,10 @@ class ParallelMapIterator : public DatasetBaseIterator {
     }
     TF_RETURN_IF_ERROR(
         input_dataset_->MakeIterator(ctx, prefix(), &input_impl_));
+      
+    //DETrain
+    OpLogger::getInstance().ResetIteration(prefix());
+
     return parallel_map_functor_->InitFunc(ctx);
   }
 
@@ -325,7 +333,19 @@ class ParallelMapIterator : public DatasetBaseIterator {
     RecordStop(ctx);
     result->notification.WaitForNotification();
     RecordStart(ctx);
+
     return ProcessResult(ctx, result, out_tensors, end_of_sequence);
+    /*
+    //DETrain
+    Status s = ProcessResult(ctx, result, out_tensors, end_of_sequence);
+    if((*out_tensors).size()>0){
+      std::string val = (*out_tensors)[0].DebugString(10);
+      fprintf(stderr, "[PARALLEL_MAP %p] GetNext [%d] %s\n", this, *end_of_sequence, val.substr(0, 200).c_str());
+    } else {
+      fprintf(stderr, "[PARALLEL_MAP %p] GetNext [%d] Tensor NULL\n", this, *end_of_sequence);
+    }
+    return s; 
+    */
   }
 
  protected:
@@ -349,9 +369,14 @@ class ParallelMapIterator : public DatasetBaseIterator {
           "Unexpected outstanding calls encountered.");
     }
     TF_RETURN_IF_ERROR(SaveInput(writer, input_impl_));
+    //DETrain
+    int64 current_iter = OpLogger::getInstance().GetIterationByName(prefix());
+    TF_RETURN_IF_ERROR(writer->WriteScalar(full_name("current_iter"), current_iter));
+
     TF_RETURN_IF_ERROR(writer->WriteScalar(
         full_name(strings::StrCat(kInvocationResults, kSizeSuffix)),
         invocation_results_.size()));
+    fprintf(stderr, "save cached results %ld at %p\n", invocation_results_.size(), this);
     for (size_t i = 0; i < invocation_results_.size(); i++) {
       const auto& result = *(invocation_results_[i]);
       TF_RETURN_IF_ERROR(WriteStatusLocked(writer, i, result.status));
@@ -379,6 +404,11 @@ class ParallelMapIterator : public DatasetBaseIterator {
                          IteratorStateReader* reader) override {
     mutex_lock l(*mu_);
     TF_RETURN_IF_ERROR(RestoreInput(ctx, reader, input_impl_));
+    //DETrain
+    int64 current_iter;
+    TF_RETURN_IF_ERROR(reader->ReadScalar(full_name("current_iter"), &current_iter));
+    OpLogger::getInstance().ResetIteration(prefix(), current_iter);
+
     int64 invocation_results_size;
     TF_RETURN_IF_ERROR(reader->ReadScalar(
         full_name(strings::StrCat(kInvocationResults, kSizeSuffix)),

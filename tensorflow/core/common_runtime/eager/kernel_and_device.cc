@@ -47,6 +47,8 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/meta_optimizer.h"
 #endif  // !IS_MOBILE_PLATFORM
 
+#include "tensorflow/core/util/op_logger.h"
+
 namespace tensorflow {
 
 Status EagerKernelArgs::GetLocalArg(const int index, Tensor* val) const {
@@ -217,9 +219,13 @@ Status KernelAndDeviceOp::Run(
 Status KernelAndDeviceFunc::Run(
     const EagerKernelArgs& inputs, std::vector<Tensor>* outputs,
     CancellationManager* cancellation_manager,
-    const absl::optional<EagerRemoteFunctionParams>& remote_func_params) {
+    const absl::optional<EagerRemoteFunctionParams>& remote_func_params) { 
   const std::vector<Device*> devices = pflr_->device_mgr()->ListDevices();
-  ScopedStepContainer step_container(0, [&devices](const string& name) {
+  //DETrain
+  std::string name_ = "KernelAndDeviceFunc";
+  OpLogger::getInstance().SaveOrRestoreIterations(name_);
+  uint64 current_iter = OpLogger::getInstance().GetAndAddIterationByName(name_);
+  ScopedStepContainer step_container(current_iter, [&devices](const string& name) {
     for (Device* device : devices) {
       device->resource_manager()->Cleanup(name).IgnoreError();
     }
@@ -334,6 +340,7 @@ Status KernelAndDeviceFunc::Run(
     std::vector<Tensor>* outputs, CancellationManager* cancellation_manager,
     const absl::optional<EagerRemoteFunctionParams>& remote_func_params) {
   std::unique_ptr<FunctionLibraryRuntime::Options> opts = nullptr;
+
   if (remote_func_params.has_value()) {
     const EagerRemoteFunctionParams& params = remote_func_params.value();
     if (params.step_id.has_value()) {
@@ -370,6 +377,8 @@ Status KernelAndDeviceFunc::Run(
   }
   opts->allow_dead_tensors = true;
   opts->step_container = step_container;
+  //DETrain
+  opts->steps = step_container->step_id();
   opts->collective_executor =
       collective_executor_ ? collective_executor_->get() : nullptr;
 

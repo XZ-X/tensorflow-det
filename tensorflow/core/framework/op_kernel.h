@@ -620,6 +620,7 @@ class OpKernelContext {
 
     // The step being executed.
     int64 step_id = 0;
+    int64 steps = -1; //DETrain
 
     // True if the op is created by eager runtime.
     bool is_eager = false;
@@ -739,6 +740,8 @@ class OpKernelContext {
 
   int64 step_id() const { return params_->step_id; }
 
+  int64 current_step() const { return params_->steps; }
+  
   bool is_eager() const { return params_->is_eager; }
 
   const OpKernel& op_kernel() const { return *params_->op_kernel; }

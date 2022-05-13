@@ -68,6 +68,8 @@ limitations under the License.
 #include "tensorflow/core/profiler/internal/traceme_recorder.h"
 #include "tensorflow/core/profiler/lib/traceme.h"
 #include "tensorflow/core/util/tensor_slice_reader_cache.h"
+#include "tensorflow/core/util/op_logger.h"
+#include <random>
 
 namespace tensorflow {
 namespace {
@@ -1286,6 +1288,10 @@ class ExecutorState {
   const bool log_memory_;
 
   int64 step_id_;
+  //DETrain
+  int64 steps_;
+  int* rand;
+
   // Not owned.
   Rendezvous* rendezvous_;
   Executor::RendezvousFactory* create_rendezvous_ = nullptr;
@@ -1424,6 +1430,7 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
     : vlog_(VLOG_IS_ON(1)),
       log_memory_(LogMemory::IsEnabled()),
       step_id_(args.step_id),
+      steps_(args.steps), //DETrain
       rendezvous_(args.rendezvous),
       create_rendezvous_(&impl->params_.rendezvous_factory),
       collective_executor_(args.collective_executor),
@@ -1462,6 +1469,14 @@ ExecutorState::ExecutorState(const Executor::Args& args, ExecutorImpl* impl)
                             root_frame_->total_input_tensors));
 
   outstanding_frames_.insert({root_frame_->frame_name, root_frame_});
+
+  //DETrain
+  int nodes = impl->gview_.num_nodes();
+  rand = new int[nodes];
+  std::mt19937 r1(steps_);
+  for(int i=0; i<nodes; i++) {
+    rand[i] = r1();
+  }//DETrain
 }
 
 ExecutorState::~ExecutorState() {
@@ -1471,6 +1486,8 @@ ExecutorState::~ExecutorState() {
   if (device_context_) {
     device_context_->Unref();
   }
+  //DETrain
+  delete rand;
   delete slice_reader_cache_;
 }
 
@@ -1733,6 +1750,8 @@ void ExecutorState::Process(TaggedNode tagged_node, int64 scheduled_nsec) {
     FrameState* input_frame = tagged_node.input_frame;
     const int64 input_iter = tagged_node.input_iter;
     const int id = item.node_id;
+
+    params.steps = rand[id]; //DETrain
 
     // TODO(misard) Replace with a finer-grain enabling flag once we
     // add better optional debugging support.

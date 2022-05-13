@@ -213,6 +213,8 @@ class ShuffleDatasetOpBase::ShuffleDatasetBase : public DatasetBase {
             Random() % (slices_.front()->end - slices_.front()->start);
         int64 index =
             (slices_.front()->start + offset) % this->dataset()->buffer_size_;
+        //DETrain
+        //fprintf(stderr, "[%p] get data at %ld, offset %ld, end %ld, start %ld at [%p], num_elements_ %ld\n", this, index, offset, slices_.front()->end, slices_.front()->start, &(slices_.front()->start), num_elements_);
         *out_tensors = std::move(buffer_[index]);
         this->RecordBufferDequeue(ctx, *out_tensors);
         std::swap(
@@ -561,8 +563,10 @@ class ShuffleDatasetOp::ReshufflingDatasetV2 : public ShuffleDatasetBase {
   }
 
   Status CheckExternalState() const override {
-    return errors::FailedPrecondition(
-        DebugString(), " depends on random seed generator resource.");
+    //DETrain
+    return input_->CheckExternalState();
+    //return errors::FailedPrecondition(
+    //    DebugString(), " depends on random seed generator resource.");
   }
 
   std::unique_ptr<IteratorBase> MakeIteratorInternal(
@@ -745,8 +749,10 @@ void ShuffleDatasetOp::MakeDataset(OpKernelContext* ctx, DatasetBase* input,
   // By TensorFlow convention, passing 0 for both seeds indicates
   // that the shuffling should be seeded non-deterministically.
   if (seed == 0 && seed2 == 0) {
-    seed = random::New64();
-    seed2 = random::New64();
+    //seed = random::New64();
+    //seed2 = random::New64();
+    seed = 1000; 
+    seed2 = 1000; 
   }
 
   if (reshuffle_each_iteration_) {
@@ -835,8 +841,10 @@ void ShuffleAndRepeatDatasetOp::MakeDataset(OpKernelContext* ctx,
   // By TensorFlow convention, if both seeds are 0, then shuffling should be
   // seeded non-deterministically.
   if (seed == 0 && seed2 == 0) {
-    seed = random::New64();
-    seed2 = random::New64();
+    //seed = random::New64();
+    //seed2 = random::New64();
+    seed = 42; 
+    seed2 = 43; 
   }
 
   *output = new Dataset(ctx, input, buffer_size, seed, seed2, count);

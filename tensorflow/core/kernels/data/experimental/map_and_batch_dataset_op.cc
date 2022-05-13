@@ -36,6 +36,8 @@ limitations under the License.
 #include "tensorflow/core/platform/cpu_info.h"
 #include "tensorflow/core/platform/tracing.h"
 
+#include "tensorflow/core/util/op_logger.h"
+
 namespace tensorflow {
 namespace data {
 namespace experimental {
@@ -211,6 +213,10 @@ class MapAndBatchDatasetOp::Dataset : public DatasetBase {
       }
       TF_RETURN_IF_ERROR(
           dataset()->input_->MakeIterator(ctx, prefix(), &input_impl_));
+          
+      //DETrain
+      OpLogger::getInstance().ResetIteration(prefix());
+
       return dataset()->captured_func_->Instantiate(
           ctx, &instantiated_captured_func_);
     }
@@ -235,6 +241,17 @@ class MapAndBatchDatasetOp::Dataset : public DatasetBase {
         cond_var_->notify_all();
       }
       return ProcessResult(ctx, result, out_tensors, end_of_sequence);
+    
+      /*
+      Status s = ProcessResult(ctx, result, out_tensors, end_of_sequence);
+      if((*out_tensors).size()>0){
+        std::string val = (*out_tensors)[0].DebugString(10);
+        fprintf(stderr, "[MAP_AND_BATCH %p] GetNext [%d] %s\n", this, *end_of_sequence, val.substr(0, 200).c_str());
+      } else {
+        fprintf(stderr, "[MAP_AND_BATCH %p] GetNext [%d] Tensor NULL\n", this, *end_of_sequence);
+      }
+      return s; 
+      */
     }
 
    protected:
@@ -254,6 +271,11 @@ class MapAndBatchDatasetOp::Dataset : public DatasetBase {
       }
       DCHECK_EQ(num_calls_, 0);
       TF_RETURN_IF_ERROR(SaveInput(writer, input_impl_));
+      
+      //DETrain
+      int64 current_iter = OpLogger::getInstance().GetIterationByName(prefix());
+      TF_RETURN_IF_ERROR(writer->WriteScalar(full_name("current_iter"), current_iter));
+
       TF_RETURN_IF_ERROR(
           writer->WriteScalar(full_name(kCallCounter), call_counter_));
       TF_RETURN_IF_ERROR(writer->WriteScalar(full_name(kBatchResultsSize),
@@ -268,6 +290,11 @@ class MapAndBatchDatasetOp::Dataset : public DatasetBase {
                            IteratorStateReader* reader) override {
       mutex_lock l(*mu_);
       TF_RETURN_IF_ERROR(RestoreInput(ctx, reader, input_impl_));
+      //DETrain
+      int64 current_iter;
+      TF_RETURN_IF_ERROR(reader->ReadScalar(full_name("current_iter"), &current_iter));
+      OpLogger::getInstance().ResetIteration(prefix(), current_iter);
+
       TF_RETURN_IF_ERROR(
           reader->ReadScalar(full_name(kCallCounter), &call_counter_));
       int64 batch_results_size;
@@ -337,7 +364,8 @@ class MapAndBatchDatasetOp::Dataset : public DatasetBase {
     }
 
     void CallFunction(std::shared_ptr<IteratorContext> ctx,
-                      const std::shared_ptr<BatchResult>& result, int64 offset)
+                      const std::shared_ptr<BatchResult>& result, int64 offset, 
+                      int64 steps)
         LOCKS_EXCLUDED(*mu_) {
       // Get the next input element.
       std::vector<Tensor> input_element;
@@ -358,7 +386,7 @@ class MapAndBatchDatasetOp::Dataset : public DatasetBase {
 
       std::shared_ptr<std::vector<Tensor>> return_values =
           std::make_shared<std::vector<Tensor>>();
-      auto done = [this, ctx, result, return_values, offset](Status status) {
+      auto done = [this, ctx, result, return_values, offset, steps](Status status) {
         if (dataset()->preserve_cardinality_ && errors::IsOutOfRange(status)) {
           // To guarantee that the transformation preserves the cardinality of
           // the dataset, we convert `OutOfRange` to `InvalidArgument` as the
@@ -413,7 +441,7 @@ class MapAndBatchDatasetOp::Dataset : public DatasetBase {
       // `return_values`, and invoking `done` when finished.
       instantiated_captured_func_->RunAsync(ctx.get(), std::move(input_element),
                                             return_values.get(),
-                                            std::move(done), prefix());
+                                            std::move(done), prefix(), steps);
     }
 
     Status CopyPartialBatch(Tensor* output, const Tensor& value,
@@ -578,8 +606,11 @@ class MapAndBatchDatasetOp::Dataset : public DatasetBase {
                   static_cast<float>(num_parallel_calls_->value),
               num_elements());
         }
+        //DETrain
+        //int64 current_counter = call_counter_ - new_calls.size();
         for (const auto& call : new_calls) {
-          CallFunction(ctx, call.first, call.second);
+          uint64 current_iter = OpLogger::getInstance().GetAndAddIterationByName(prefix());
+          CallFunction(ctx, call.first, call.second, current_iter);
         }
         new_calls.clear();
       }

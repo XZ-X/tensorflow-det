@@ -14,6 +14,9 @@ limitations under the License.
 ==============================================================================*/
 #include <deque>
 
+#include <iostream>
+#include <fstream>
+
 #include "tensorflow/core/common_runtime/input_colocation_exemption_registry.h"
 #include "tensorflow/core/common_runtime/process_function_library_runtime.h"
 #include "tensorflow/core/framework/cancellation.h"
@@ -30,6 +33,8 @@ limitations under the License.
 #include "tensorflow/core/lib/gtl/cleanup.h"
 #include "tensorflow/core/lib/random/random.h"
 #include "tensorflow/core/util/device_name_utils.h"
+
+#include "tensorflow/core/util/op_logger.h"
 
 namespace tensorflow {
 namespace data {
@@ -92,9 +97,13 @@ class MultiDeviceIterator : public ResourceBase {
     ++incarnation_id_;
     *incarnation_id = incarnation_id_;
 
+    //DETrain
+    //OpLogger::getInstance().AddMultiDeviceIterator(std::to_string(incarnation_id), this);
+
     multi_device_buffer_ = absl::make_unique<MultiDeviceBuffer>(
         devices_.size(), max_buffer_size, incarnation_id_, std::move(iterator),
         this);
+    
     return Status::OK();
   }
 
@@ -159,7 +168,7 @@ class MultiDeviceIterator : public ResourceBase {
           max_buffer_size_(max_buffer_size),
           incarnation_id_(incarnation_id),
           host_iterator_(std::move(host_iterator)),
-          parent_(parent) {}
+          parent_(parent) { }
 
     ~MultiDeviceBuffer() {
       {
@@ -167,6 +176,177 @@ class MultiDeviceIterator : public ResourceBase {
         if (!background_thread_started_) return;
       }
       Reset();
+    }
+  
+    void SaveBuffer() {
+      mutex_lock l(mu_ckpt_); 
+      const char* cmd = getenv("TF_CHECKPOINT_MULTI_DEVICE_ITER_CMD");
+      if(cmd!=NULL && strcmp(cmd, "2") == 0) { 
+        const char* path = getenv("TF_CHECKPOINT_DEVICE_ITER_SAVEPATH");
+        fprintf(stderr, "Save multi device buffer %ld\n", incarnation_id_);
+        VariantTensorData data;
+        data.set_type_name("multi-device-buffer");
+        data::VariantTensorDataWriter writer(&data);
+        Status s = this->Save(&writer);
+        if(!s.ok()) {
+          fprintf(stderr, "WARNING: Save multi-device buffer failed!!!\n");
+          return;
+        }
+        writer.Flush();
+
+        std::string data_str = data.SerializeAsString();
+        size_t size = data_str.size();
+
+        std::string file_path = strings::StrCat(std::string(path), incarnation_id_);
+        std::ofstream ofile;
+        ofile.open(file_path.c_str(), std::ofstream::trunc | std::ofstream::binary);
+        ofile.write(const_cast<char*>(data_str.data()), size);
+        ofile.close();
+
+        setenv("TF_CHECKPOINT_MULTI_DEVICE_ITER_CMD", "0", 1);
+      }
+    }
+
+    void RestoreBuffer(IteratorContext* ctx) {
+      mutex_lock l(mu_ckpt_); 
+      const char* cmd = getenv("TF_CHECKPOINT_MULTI_DEVICE_ITER_CMD");
+      if(cmd!=NULL && strcmp(cmd, "1") == 0) { 
+
+        VariantTensorData data;
+        const char* path = getenv("TF_CHECKPOINT_DEVICE_ITER_SAVEPATH");
+        std::string file_path = strings::StrCat(std::string(path), incarnation_id_);
+        fprintf(stderr, "Start to Restore Multi-device Iterator %s\n", file_path.c_str());
+        std::ifstream ifile;
+        ifile.open(file_path.c_str(), std::ifstream::binary);
+        if (!ifile.is_open()){
+          fprintf(stderr, "Fail to open %s\n", file_path.c_str());
+          return;
+        } 
+
+        ifile.seekg(0, ifile.end);
+        size_t size = ifile.tellg();
+        ifile.seekg(0, ifile.beg);
+        std::string saved_data(size, '\0');
+        ifile.read(const_cast<char*>(saved_data.data()), size);
+        ifile.close();
+        if(!data.ParseFromString(saved_data)) {
+          fprintf(stderr, "fail to parse Multi-device saved_data\n");
+          return;
+        }
+
+        data::VariantTensorDataReader reader(&data);
+        fprintf(stderr, "Before Restore Multi-device Iterator\n");
+        Status s = this->Restore(ctx, &reader); 
+        if(!s.ok()) {
+          fprintf(stderr, "WARNING: restore Multi-device iterator failed!!!\n");
+        }
+        fprintf(stderr, "Restore Multi-device Iterator\n");
+
+        setenv("TF_CHECKPOINT_MULTI_DEVICE_ITER_CMD", "0", 1);
+      }
+    }
+
+    Status Save(IteratorStateWriter* writer) {
+      {
+        mutex_lock l(mu_);
+        if (background_thread_ && !background_thread_finished_) {
+          cancelled_ = true;
+          // Wake up the background thread.
+          for (int i = 0; i < size_; ++i) {
+            buffer_[i].cond_var.notify_all();
+          }
+
+          // Make sure background thread has finished first.
+          while (!background_thread_finished_) {
+            shutdown_cond_var_.wait(l);
+          }
+          background_thread_.reset(nullptr);
+          cancelled_ = false;
+        }
+      }
+
+      mutex_lock l(mu_);
+      TF_RETURN_IF_ERROR(host_iterator_->Save(NULL, writer));
+
+      TF_RETURN_IF_ERROR(writer->WriteScalar("shard_size", size_));
+      for (int i=0; i<size_; ++i) {
+        int buf_size = buffer_[i].data.size();
+        TF_RETURN_IF_ERROR(writer->WriteScalar(
+              strings::StrCat("shard_buf_size", "[", i, "]"), buf_size));
+        fprintf(stderr, "save shard %d buf %d\n", i, buf_size);
+        for (int j=0; j<buf_size; j++) {
+          std::string prefix = strings::StrCat("shard_buf_size", "[", i, "][", j, "].");
+
+          // write status
+          Status s = buffer_[i].data[j].status;
+          TF_RETURN_IF_ERROR(writer->WriteScalar(prefix+"status_code", static_cast<int64>(s.code())));
+          if (!s.ok()) {
+            TF_RETURN_IF_ERROR(writer->WriteScalar(prefix+"status_msg", s.error_message()));
+          }
+
+          // write end of seq
+          if (buffer_[i].data[j].end_of_sequence)
+            TF_RETURN_IF_ERROR(writer->WriteScalar(strings::StrCat(prefix, "end_seq"), ""));
+
+          // write tensor
+          int tensor_size = buffer_[i].data[j].value.size();
+          TF_RETURN_IF_ERROR(writer->WriteScalar(strings::StrCat(prefix, "tensor_size"), tensor_size));
+          for (size_t k=0; k<tensor_size; k++) {
+            TF_RETURN_IF_ERROR(
+                writer->WriteTensor(strings::StrCat("buf_tensor", "[", i, "][", j, "][", k, "]"), 
+                  buffer_[i].data[j].value[k]));
+          }
+        }
+      }
+      return Status::OK();
+    }
+
+    Status Restore(IteratorContext* ctx, IteratorStateReader* reader) {
+      mutex_lock l(mu_);
+      TF_RETURN_IF_ERROR(host_iterator_->Restore(ctx, reader));
+
+      int64 shard_size;
+      TF_RETURN_IF_ERROR(reader->ReadScalar("shard_size", &shard_size));
+      for (int i=0; i<shard_size; ++i) {
+        if (!buffer_[i].data.empty()) buffer_[i].data.clear();
+
+        int64 buf_size;
+        TF_RETURN_IF_ERROR(reader->ReadScalar(
+              strings::StrCat("shard_buf_size", "[", i, "]"), &buf_size));
+
+        for (int j=0; j<buf_size; j++) {
+          std::string prefix = strings::StrCat("shard_buf_size", "[", i, "][", j, "].");
+          HostBufferElement elem;
+
+          int64 code_int;
+          TF_RETURN_IF_ERROR(reader->ReadScalar(prefix+"status_code", &code_int));
+          error::Code code = static_cast<error::Code>(code_int);
+
+          if (code != error::Code::OK) {
+            tstring error_message;
+            TF_RETURN_IF_ERROR(reader->ReadScalar(prefix+"status_msg", &error_message));
+            elem.status = Status(code, error_message);
+          } else {
+            elem.status = Status::OK();
+          }
+
+          // read end of seq
+          elem.end_of_sequence = reader->Contains(prefix+"end_seq");
+
+          // read tensors
+          int64 tensor_size;
+          TF_RETURN_IF_ERROR(reader->ReadScalar(strings::StrCat(prefix, "tensor_size"), &tensor_size));
+          for (size_t k=0; k<tensor_size; k++) {
+            elem.value.emplace_back();
+            TF_RETURN_IF_ERROR(
+                reader->ReadTensor(strings::StrCat("buf_tensor", "[", i, "][", j, "][", k, "]"), 
+                  &elem.value.back()));
+          }
+
+          buffer_[i].data.push_back(std::move(elem));
+        }
+      }
+      return Status::OK();
     }
 
     void Reset() LOCKS_EXCLUDED(mu_) {
@@ -189,8 +369,8 @@ class MultiDeviceIterator : public ResourceBase {
     }
 
     void GetNextFromShard(IteratorContext* ctx, int shard_num,
-                          int64 incarnation_id,
-                          MultiDeviceIteratorCallback callback) {
+        int64 incarnation_id,
+        MultiDeviceIteratorCallback callback) {
       HostBufferElement elem;
       if (incarnation_id_ != incarnation_id) {
         elem.status = errors::InvalidArgument(
@@ -199,6 +379,10 @@ class MultiDeviceIterator : public ResourceBase {
         callback(elem);
         return;
       }
+
+      //DETrain
+      RestoreBuffer(ctx); 
+      SaveBuffer();
 
       bool produced_output = false;
       {
@@ -235,19 +419,19 @@ class MultiDeviceIterator : public ResourceBase {
       }
     }
 
-   private:
+      private:
     void EnsureBackgroundThreadStarted(IteratorContext* ctx)
-        EXCLUSIVE_LOCKS_REQUIRED(mu_) {
-      if (!background_thread_) {
-        auto ctx_copy = std::make_shared<IteratorContext>(*ctx);
-        background_thread_ =
+      EXCLUSIVE_LOCKS_REQUIRED(mu_) {
+        if (!background_thread_) {
+          auto ctx_copy = std::make_shared<IteratorContext>(*ctx);
+          background_thread_ =
             parent_->unbounded_thread_pool_.get_thread_factory()->StartThread(
                 "tf_data_multi_device_iterator",
                 std::bind(
-                    &MultiDeviceIterator::MultiDeviceBuffer::BackgroundThread,
-                    this, std::move(ctx_copy)));
+                  &MultiDeviceIterator::MultiDeviceBuffer::BackgroundThread,
+                  this, std::move(ctx_copy)));
+        }
       }
-    }
 
     void RunPendingCallbacks() LOCKS_EXCLUDED(mu_) {
       // Run all remaining callbacks.
@@ -264,7 +448,7 @@ class MultiDeviceIterator : public ResourceBase {
                 elem.end_of_sequence = true;
               } else {
                 elem.status =
-                    errors::Cancelled("Cancelled and buffer not filled.");
+                  errors::Cancelled("Cancelled and buffer not filled.");
               }
               cancellation_elements.push_back(std::move(elem));
             } else {
@@ -297,7 +481,7 @@ class MultiDeviceIterator : public ResourceBase {
         {
           mutex_lock l(mu_);
           while (!cancelled_ &&
-                 buffer_[shard_to_fetch].data.size() >= max_buffer_size_) {
+              buffer_[shard_to_fetch].data.size() >= max_buffer_size_) {
             buffer_[shard_to_fetch].cond_var.wait(l);
           }
 
@@ -309,7 +493,7 @@ class MultiDeviceIterator : public ResourceBase {
         }
 
         elem.status = host_iterator_->GetNext(ctx.get(), &elem.value,
-                                              &elem.end_of_sequence);
+            &elem.end_of_sequence);
 
         if (elem.status.ok() && elem.end_of_sequence) {
           end_of_iterator = true;
@@ -353,6 +537,7 @@ class MultiDeviceIterator : public ResourceBase {
       std::deque<MultiDeviceIteratorCallback> callbacks;
     };
 
+    mutex mu_ckpt_;
     mutex mu_;
     std::unique_ptr<Thread> background_thread_ GUARDED_BY(mu_);
     bool background_thread_finished_ GUARDED_BY(mu_) = false;
@@ -577,6 +762,7 @@ class MultiDeviceIteratorInitOp : public OpKernel {
     int64 incarnation_id;
     OP_REQUIRES_OK(ctx, resource->Init(std::move(iterator), max_buffer_size,
                                        &incarnation_id));
+
     Tensor tensor_incarnation_id(DT_INT64, TensorShape({}));
     tensor_incarnation_id.scalar<int64>()() = incarnation_id;
     OP_REQUIRES_OK(ctx,

@@ -158,7 +158,15 @@ class GeneratorDatasetOp::Dataset : public DatasetBase {
         IteratorContext* ctx, model::Node::Args args) const override {
       return model::MakeSourceNode(std::move(args));
     }
+    //DETrain
+    Status SaveInternal(IteratorStateWriter* writer) override {
+      return Status::OK();
+    }
 
+    Status RestoreInternal(IteratorContext* ctx,
+                             IteratorStateReader* reader) override {
+      return Status::OK();
+    }//END
    private:
     mutex mu_;
     bool initialized_ GUARDED_BY(mu_) = false;

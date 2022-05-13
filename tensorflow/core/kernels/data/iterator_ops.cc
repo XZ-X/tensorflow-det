@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 #include "tensorflow/core/kernels/data/iterator_ops.h"
-
+#include "tensorflow/core/util/op_logger.h"
 #include <memory>
 
 #include "absl/memory/memory.h"
@@ -59,6 +59,34 @@ const char kOutputShapes[] = "output_shapes";
 const char kOutputTypes[] = "output_types";
 
 }  // namespace
+
+//DETrain
+IteratorResource::~IteratorResource() { 
+  OpLogger::getInstance().RemoveIterator(iterator_state_->iter_id_);
+  VLOG(2) << "destructor"; 
+}
+//DETrain
+void IteratorResource::SaveOrRestoreIterators(OpKernelContext* ctx) {  
+  //check and save/restore iterator
+  std::shared_ptr<State> captured_state;
+  {
+    tf_shared_lock l(mu_);
+    captured_state = iterator_state_;
+  }
+  if (captured_state->iterator) {
+    IteratorContext::Params params(ctx);
+    params.flr = captured_state->flr;
+    params.function_handle_cache = captured_state->function_handle_cache.get();
+    params.resource_mgr = &captured_state->resource_mgr;
+    params.thread_factory = unbounded_thread_pool_.get_thread_factory();
+    params.thread_pool = &unbounded_thread_pool_;
+    params.cancellation_manager = &captured_state->cancellation_manager;
+    IteratorContext ictx(params);
+    OpLogger::getInstance().SaveOrRestoreIterators(captured_state->iter_id_, &ictx);
+    //OpLogger::getInstance().SaveOrRestoreIterators(captured_state->iter_id_, &ictx, true);
+  }
+}
+
 
 Status IteratorResource::GetNext(OpKernelContext* ctx,
                                  std::vector<Tensor>* out_tensors,
@@ -162,13 +190,20 @@ Status IteratorResource::SetIteratorFromDataset(OpKernelContext* ctx,
       &deregister_fn));
   {
     auto cleanup = gtl::MakeCleanup(std::move(deregister_fn));
-    TF_RETURN_IF_ERROR(dataset->MakeIterator(IteratorContext(std::move(params)),
+    TF_RETURN_IF_ERROR(dataset->MakeIterator(IteratorContext(params),
                                              "Iterator", &iterator));
     TF_RETURN_IF_ERROR(
         VerifyTypesMatch(output_dtypes_, iterator->output_dtypes()));
     TF_RETURN_IF_ERROR(
         VerifyShapesCompatible(output_shapes_, iterator->output_shapes()));
     std::swap(new_state->iterator, iterator);
+
+    //DETrain
+    new_state->iter_id_ = HandleFromInput(ctx, 1).name();
+    OpLogger::getInstance().AddIterator(new_state->iter_id_, new_state->iterator.get());
+    //check and save/restore iterator
+    IteratorContext ictx(std::move(params));
+    OpLogger::getInstance().SaveOrRestoreIterators(new_state->iter_id_, &ictx);
   }
 
   mutex_lock l(mu_);
@@ -903,6 +938,11 @@ void IteratorGetNextOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   IteratorResource* iterator;
   OP_REQUIRES_OK_ASYNC(
       ctx, LookupResource(ctx, HandleFromInput(ctx, 0), &iterator), done);
+
+  //DETrain
+  fprintf(stderr, "IteratorGetNextOp\n");
+  //DETrain
+  iterator->SaveOrRestoreIterators(ctx);
   // The call to `iterator->GetNext()` may block and depend on an
   // inter-op thread pool thread, so we issue the call from the
   // owned thread pool.
@@ -937,6 +977,10 @@ void IteratorGetNextSyncOp::Compute(OpKernelContext* ctx) {
   core::ScopedUnref unref_iterator(iterator);
   std::vector<Tensor> components;
   bool end_of_sequence = false;
+
+  // DETrain
+  fprintf(stderr, "IteratorGetNextSyncOp\n");
+  iterator->SaveOrRestoreIterators(ctx);
 
   OP_REQUIRES_OK(ctx, iterator->GetNext(ctx, &components, &end_of_sequence));
   OP_REQUIRES(ctx, !end_of_sequence, errors::OutOfRange("End of sequence"));

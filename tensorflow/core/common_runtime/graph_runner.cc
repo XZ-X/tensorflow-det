@@ -172,7 +172,8 @@ Status GraphRunner::Run(Graph* graph, FunctionLibraryRuntime* function_library,
 
   Executor* executor;
   TF_RETURN_IF_ERROR(NewLocalExecutor(params, *graph_to_run, &executor));
-  std::unique_ptr<Executor> executor_unref(executor);
+  //DETrain
+  // std::unique_ptr<Executor> executor_unref(executor);
 
   Executor::Args args;
   // NOTE: we could take a step id as an argument, but currently
@@ -207,7 +208,8 @@ Status GraphRunner::Run(Graph* graph, FunctionLibraryRuntime* function_library,
     // deleted along with the device.
     (*outputs)[i] = tensor::DeepCopy(output_tensor);
   }
-
+  //DETrain
+  executor->~Executor(); // Release resource
   return Status::OK();
 }
 

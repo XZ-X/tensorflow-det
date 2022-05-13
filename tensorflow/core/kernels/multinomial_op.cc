@@ -208,6 +208,13 @@ class MultinomialOp : public OpKernel {
       if (std::is_same<Device, CPUDevice>::value) num_samples_ceil_4 *= 2;
       auto rng =
           generator->ReserveRandomOutputs(batch_size * num_samples_ceil_4, 256);
+
+      //DETrain
+      int64 current_seed = ctx->current_step();
+      if(current_seed!=-1) {
+        rng = 
+          generator->ReserveRandomOutputs(batch_size * num_samples_ceil_4, 256, current_seed);
+      }
       functor::MultinomialFunctor<Device, T, OutputType>()(
           ctx, ctx->eigen_device<Device>(), logits_t.matrix<T>(),
           noises.flat<float>(), scores.flat<float>(), scratch.flat<float>(),

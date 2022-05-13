@@ -343,6 +343,11 @@ class SampleDistortedBoundingBoxV2Op : public OpKernel {
     const float max_sample_aspect_ratio = aspect_ratio_range_[1];
 
     auto local_gen = generator_.ReserveSamples32(4 * max_attempts_);
+    //DETrain
+    int64 current_seed = context->current_step();
+    if(current_seed!=-1) {
+      local_gen = generator_.ReserveSamples32(4 * max_attempts_, current_seed);
+    }
     random::SimplePhilox random(&local_gen);
 
     Rectangle crop_rect;

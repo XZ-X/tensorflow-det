@@ -57,7 +57,9 @@ class ArithmeticOptimizer : public GraphOptimizer {
 
   // Granular control for arithmetic optimizer stages
   struct ArithmeticOptimizerOptions {
-    bool combine_add_to_addn = true;
+    //DETrain
+    bool combine_add_to_addn = false;
+    // bool combine_add_to_addn = true;
     bool convert_sqrt_div_to_rsqrt_mul = true;
     bool dedup_computations = true;
     bool fold_conjugate_into_transpose = true;

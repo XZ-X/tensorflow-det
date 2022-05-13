@@ -413,7 +413,10 @@ class FunctionLibraryRuntimeImpl : public FunctionLibraryRuntime {
 
     ~Item() {
       delete this->func_graph;
-      delete this->exec;
+      //DETrain
+      // delete this->exec;
+      if(this->exec!=nullptr)
+        this->exec->~Executor();
       delete this->overlay_flr;
     }
   };
@@ -998,6 +1001,7 @@ void FunctionLibraryRuntimeImpl::ExecutorArgsFromOptions(
     Executor::Args* exec_args) {
   // Inherit the step_id from the caller.
   exec_args->step_id = run_opts.step_id;
+  exec_args->steps = run_opts.steps; //DETrain
   exec_args->rendezvous = run_opts.rendezvous;
   exec_args->stats_collector = run_opts.stats_collector;
   exec_args->cancellation_manager = run_opts.cancellation_manager;

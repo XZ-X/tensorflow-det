@@ -982,8 +982,10 @@ class CacheDatasetOp::MemoryDatasetV2 : public CacheDatasetOp::MemoryDataset {
       : MemoryDataset(ctx, input, cache), handle_(std::move(handle)) {}
 
   Status CheckExternalState() const override {
-    return errors::FailedPrecondition(DebugString(),
-                                      " depends on memory cache resource.");
+    //DETrain
+    return input_->CheckExternalState();
+    // return errors::FailedPrecondition(DebugString(),
+    //                                   " depends on memory cache resource.");
   }
 
  protected:

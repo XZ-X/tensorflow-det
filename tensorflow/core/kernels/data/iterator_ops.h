@@ -49,6 +49,8 @@ class IteratorResource : public ResourceBase {
 
   ~IteratorResource() override { VLOG(2) << "destructor"; }
 
+  void SaveOrRestoreIterators(OpKernelContext* ctx);
+
   Status GetNext(OpKernelContext* ctx, std::vector<Tensor>* out_tensors,
                  bool* end_of_sequence);
 
@@ -86,6 +88,8 @@ class IteratorResource : public ResourceBase {
     ResourceMgr resource_mgr;
     CancellationManager cancellation_manager;
     std::unique_ptr<IteratorBase> iterator;
+    //DETrain
+    std::string iter_id_;
   };
 
   UnboundedThreadPool unbounded_thread_pool_;
