@@ -8208,3 +8208,11 @@ tf_cc_shared_object(
         "//tensorflow/core:all_kernels_impl",
     ],
 )
+
+filegroup(
+    name = "dataset_util",
+    srcs = [
+        "group_iterator.cc",
+    ],
+    visibility = ["//tensorflow/core:__pkg__"],
+)

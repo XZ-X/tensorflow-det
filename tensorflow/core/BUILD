@@ -2719,8 +2719,10 @@ tf_cuda_library(
         "@com_google_absl//absl/time",
         "//tensorflow/core/platform/default/build_config:platformlib",
         "//tensorflow/core/kernels:bounds_check",
+        "//tensorflow/core/kernels/data:dataset_utils",
         "//tensorflow/core/profiler/lib:traceme",
         "//third_party/eigen3",
+        #"//tensorflow/core/kernels/data:iterator_ops",
     ] + if_static(
         extra_deps = ["@com_google_protobuf//:protobuf"],
         otherwise = ["@com_google_protobuf//:protobuf_headers"],

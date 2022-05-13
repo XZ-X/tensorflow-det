@@ -47,7 +47,7 @@ class IteratorResource : public ResourceBase {
     VLOG(2) << "constructor";
   }
 
-  ~IteratorResource() override { VLOG(2) << "destructor"; }
+  ~IteratorResource() override;
 
   void SaveOrRestoreIterators(OpKernelContext* ctx);
 

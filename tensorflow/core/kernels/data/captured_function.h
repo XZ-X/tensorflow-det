@@ -90,7 +90,7 @@ class InstantiatedCapturedFunction {
   void RunAsync(IteratorContext* ctx, std::vector<Tensor>&& args,
                 std::vector<Tensor>* rets,
                 FunctionLibraryRuntime::DoneCallback done,
-                const string& prefix) const;
+                const string& prefix, int64 steps=-1) const;
 
  private:
   InstantiatedCapturedFunction(

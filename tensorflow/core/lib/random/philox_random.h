@@ -21,6 +21,7 @@ limitations under the License.
 #define TENSORFLOW_CORE_LIB_RANDOM_PHILOX_RANDOM_H_
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "tensorflow/core/platform/types.h"
 
@@ -131,6 +132,16 @@ class PhiloxRandom {
 
   PHILOX_DEVICE_INLINE
   PhiloxRandom(ResultType counter, Key key) : counter_(counter), key_(key) {}
+  
+  PHILOX_DEVICE_INLINE
+  void ResetRandom(Key key, ResultType counter) {
+    key_[0] = key[0];
+    key_[1] = key[1];
+    counter_[0] = counter[0];
+    counter_[1] = counter[1];
+    counter_[2] = counter[2];
+    counter_[3] = counter[3];
+  }
 
   PHILOX_DEVICE_INLINE
   ResultType const& counter() const { return counter_; }
